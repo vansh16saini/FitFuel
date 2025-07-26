@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Configuration for Vercel Deployment ---
@@ -65,6 +65,13 @@ const App = () => {
     const [userId, setUserId] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false); // To ensure Firestore operations wait for auth
 
+    // State for login/signup forms
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [isLoginMode, setIsLoginMode] = useState(true); // true for login, false for signup
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [authLoading, setAuthLoading] = useState(false);
+
     // --- Firebase Authentication Listener ---
     useEffect(() => {
         if (!auth) {
@@ -76,14 +83,17 @@ const App = () => {
             if (user) {
                 setUserId(user.uid);
                 console.log("User signed in:", user.uid);
+                setShowAuthModal(false); // Close auth modal on successful login
             } else {
                 // If no user is signed in, try to sign in anonymously
+                // This ensures there's always a user context for data operations,
+                // even before explicit login/signup.
                 try {
                     await signInAnonymously(auth);
                     console.log("Signed in anonymously.");
                 } catch (error) {
                     console.error("Authentication error:", error);
-                    showCustomAlert("Failed to sign in. Please try again.");
+                    showCustomAlert("Failed to sign in anonymously. Some features may not work.");
                 }
             }
             setIsAuthReady(true); // Auth state is now determined
@@ -176,6 +186,67 @@ const App = () => {
             onModalConfirm();
         }
         closeModal();
+    };
+
+    // --- Authentication Handlers ---
+    const handleEmailSignup = async () => {
+        setAuthLoading(true);
+        try {
+            await createUserWithEmailAndPassword(auth, email, password);
+            showCustomAlert("Account created successfully! You are now logged in.");
+            setEmail('');
+            setPassword('');
+        } catch (error) {
+            console.error("Signup error:", error);
+            showCustomAlert(`Signup failed: ${error.message}`);
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const handleEmailLogin = async () => {
+        setAuthLoading(true);
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+            showCustomAlert("Logged in successfully!");
+            setEmail('');
+            setPassword('');
+        } catch (error) {
+            console.error("Login error:", error);
+            showCustomAlert(`Login failed: ${error.message}`);
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const handleGoogleLogin = async () => {
+        setAuthLoading(true);
+        try {
+            const provider = new GoogleAuthProvider();
+            await signInWithPopup(auth, provider);
+            showCustomAlert("Logged in with Google successfully!");
+        } catch (error) {
+            console.error("Google login error:", error);
+            showCustomAlert(`Google login failed: ${error.message}`);
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const handleLogout = async () => {
+        if (auth) {
+            try {
+                await signOut(auth);
+                setUserId(null); // Clear user ID on logout
+                setMeals([]); // Clear local data on logout
+                setWorkouts([]);
+                setWaterCount(0);
+                showCustomAlert("You have been logged out.");
+            } catch (error) {
+                console.error("Error signing out:", error);
+                showCustomAlert("Failed to log out. Please try again.");
+            }
+        }
     };
 
     // --- Meal Planner Logic ---
@@ -335,22 +406,6 @@ const App = () => {
 
     const hydrationProgress = (waterCount / hydrationGoal) * 100;
 
-    const handleLogout = async () => {
-        if (auth) {
-            try {
-                await signOut(auth);
-                setUserId(null); // Clear user ID on logout
-                setMeals([]); // Clear local data on logout
-                setWorkouts([]);
-                setWaterCount(0);
-                showCustomAlert("You have been logged out.");
-            } catch (error) {
-                console.error("Error signing out:", error);
-                showCustomAlert("Failed to log out. Please try again.");
-            }
-        }
-    };
-
     // Render a loading state or login prompt if auth is not ready
     if (!isAuthReady) {
         return (
@@ -373,18 +428,27 @@ const App = () => {
                             <li><a href="#hydration-tracker" className="hover:underline">Hydration</a></li>
                             <li><a href="#weekly-planner" className="hover:underline">Weekly</a></li>
                         </ul>
-                        {userId && (
-                            <div className="flex items-center space-x-2 bg-white bg-opacity-20 px-3 py-1 rounded-full text-sm">
-                                <span className="font-medium">User ID:</span>
-                                <span className="truncate max-w-[100px] sm:max-w-none">{userId}</span>
+                        {userId ? (
+                            <div className="flex items-center space-x-4">
+                                <div className="flex items-center space-x-2 bg-white bg-opacity-20 px-3 py-1 rounded-full text-sm">
+                                    <span className="font-medium">User ID:</span>
+                                    <span className="truncate max-w-[100px] sm:max-w-none">{userId}</span>
+                                </div>
+                                <button
+                                    onClick={handleLogout}
+                                    className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600 transition duration-300 ease-in-out shadow-md"
+                                >
+                                    Logout
+                                </button>
                             </div>
+                        ) : (
+                            <button
+                                onClick={() => setShowAuthModal(true)}
+                                className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition duration-300 ease-in-out shadow-md"
+                            >
+                                Login / Sign Up
+                            </button>
                         )}
-                        <button
-                            onClick={handleLogout}
-                            className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600 transition duration-300 ease-in-out shadow-md"
-                        >
-                            Logout
-                        </button>
                     </nav>
                 </div>
             </header>
@@ -574,6 +638,90 @@ const App = () => {
                                     </>
                                 )}
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Authentication Modal */}
+                {showAuthModal && (
+                    <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50">
+                        <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full mx-4">
+                            <h2 className="text-2xl font-semibold mb-4 text-center">{isLoginMode ? 'Login' : 'Sign Up'}</h2>
+
+                            <div className="flex justify-center mb-6">
+                                <button
+                                    onClick={() => setIsLoginMode(true)}
+                                    className={`px-4 py-2 rounded-l-md font-medium ${isLoginMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                >
+                                    Login
+                                </button>
+                                <button
+                                    onClick={() => setIsLoginMode(false)}
+                                    className={`px-4 py-2 rounded-r-md font-medium ${!isLoginMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                >
+                                    Sign Up
+                                </button>
+                            </div>
+
+                            <input
+                                type="email"
+                                placeholder="Email"
+                                className="w-full p-3 mb-4 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                            />
+                            <input
+                                type="password"
+                                placeholder="Password"
+                                className="w-full p-3 mb-6 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                            />
+
+                            {isLoginMode ? (
+                                <button
+                                    onClick={handleEmailLogin}
+                                    className="w-full bg-green-600 text-white py-3 px-4 rounded-md hover:bg-green-700 transition duration-300 ease-in-out shadow-md mb-3"
+                                    disabled={authLoading}
+                                >
+                                    {authLoading ? 'Logging In...' : 'Login'}
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={handleEmailSignup}
+                                    className="w-full bg-purple-600 text-white py-3 px-4 rounded-md hover:bg-purple-700 transition duration-300 ease-in-out shadow-md mb-3"
+                                    disabled={authLoading}
+                                >
+                                    {authLoading ? 'Signing Up...' : 'Sign Up'}
+                                </button>
+                            )}
+
+                            <div className="relative flex items-center justify-center my-4">
+                                <div className="flex-grow border-t border-gray-300"></div>
+                                <span className="flex-shrink mx-4 text-gray-500">OR</span>
+                                <div className="flex-grow border-t border-gray-300"></div>
+                            </div>
+
+                            <button
+                                onClick={handleGoogleLogin}
+                                className="w-full bg-red-600 text-white py-3 px-4 rounded-md hover:bg-red-700 transition duration-300 ease-in-out shadow-md flex items-center justify-center space-x-2"
+                                disabled={authLoading}
+                            >
+                                <svg className="w-5 h-5" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M44.5 24.0086C44.5 22.0622 44.3218 20.1706 43.9806 18.3429H24.4996V29.4925H35.7952C35.2536 32.3276 33.6288 34.7671 31.2007 36.4385V43.167H40.0039C45.1637 38.4526 48 31.6022 48 24.0086C48 19.2604 46.9944 14.8093 45.1979 10.8719L38.4879 5.86206L30.9575 11.536C33.1537 16.5173 34.25 22.0086 34.25 27.5086C34.25 33.0086 33.1537 38.5086 30.9575 43.4899L38.4879 49.1639L45.1979 44.154C46.9944 40.2166 48 35.7655 48 31.0173C48 28.3618 47.4944 25.6173 46.5 23.0086H44.5Z" fill="#FFC107"/>
+                                    <path d="M24.4996 48C31.1396 48 36.8396 45.7486 40.0039 43.167L31.2007 36.4385C29.1415 37.8188 26.8282 38.8354 24.4996 38.8354C19.9575 38.8354 16.0396 36.1914 14.1288 32.3276L5.32561 39.0561C9.07172 44.2709 16.2082 48 24.4996 48Z" fill="#34A853"/>
+                                    <path d="M14.1288 32.3276C13.2982 30.1314 12.8354 27.8182 12.8354 25.4996C12.8354 23.181 13.2982 20.8678 14.1288 18.6716L5.32561 11.9431C1.5795 17.1579 0 23.0086 0 29.0086C0 35.0086 1.5795 40.8593 5.32561 46.0741L14.1288 39.3456C16.0396 35.4818 19.9575 32.8378 24.4996 32.8378L14.1288 32.3276Z" fill="#4285F4"/>
+                                    <path d="M24.4996 9.1646C26.8282 9.1646 29.1415 10.1812 30.9575 11.536L38.4879 5.86206C36.8396 3.28043 34.1396 1.1646 30.9575 0C26.8282 0 23.0086 2.64406 20.4996 6.5086L24.4996 9.1646Z" fill="#EA4335"/>
+                                </svg>
+                                <span>Sign in with Google</span>
+                            </button>
+
+                            <button
+                                onClick={() => setShowAuthModal(false)}
+                                className="w-full mt-4 bg-gray-300 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-400 transition duration-300 ease-in-out shadow-md"
+                            >
+                                Close
+                            </button>
                         </div>
                     </div>
                 )}
